@@ -17,6 +17,7 @@ package ovsdb
 import (
 	"context"
 	"fmt"
+	"log"
 )
 
 // ListDatabases returns the name of all databases known to the OVSDB server.
@@ -63,11 +64,26 @@ func (c *Client) Transact(ctx context.Context, db string, ops []TransactOp) ([]R
 
 	// TODO(mdlayher): deal with non-select ops too.
 	var out []struct {
-		Rows []Row `json:"rows"`
+		Rows    []Row  `json:"rows"`
+		Syntax  string `json:"syntax"`
+		Details string `json:"details"`
+		Error   string `json:"error"`
 	}
 
 	if err := c.rpc(ctx, "transact", &out, arg); err != nil {
 		return nil, err
+	}
+
+	// Check for errors in the response.
+	log.Printf("out: %v", out)
+	for _, o := range out {
+		if o.Error != "" {
+			return nil, TransactError{
+				Syntax:    o.Syntax,
+				Details:   o.Details,
+				ErrorText: o.Error,
+			}
+		}
 	}
 
 	// Flatten results from all selects into one slice of rows.
@@ -77,4 +93,15 @@ func (c *Client) Transact(ctx context.Context, db string, ops []TransactOp) ([]R
 	}
 
 	return rows, nil
+}
+
+// {"syntax":"{\"op\":\"select\",\"table\":\"AWLAN_Node2\",\"where\":[]}","details":"Parsing ovsdb operation 1 of 1 failed: No table named AWLAN_Node2.","error":"syntax error"}
+type TransactError struct {
+	Syntax    string `json:"syntax"`
+	Details   string `json:"details"`
+	ErrorText string `json:"error"`
+}
+
+func (e TransactError) Error() string {
+	return fmt.Sprintf("transact error: %s", e.ErrorText)
 }
